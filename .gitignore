@@ -1,6 +1,7 @@
 node_modules/
 commends.db
 config.json
+bots.txt
 .env
+.DS_Store
 *.log
-proxies.txt

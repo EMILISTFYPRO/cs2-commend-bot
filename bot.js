@@ -99,10 +99,6 @@ async function sendCommends(targetSteamID, commendTypes) {
                     console.log('🔐 Logging into Steam...');
                     await steamBot.login();
                     
-                    // Connect to CS2 coordinator
-                    console.log('🎮 Connecting to CS2...');
-                    await steamBot.connectToCSGO();
-                    
                     // Send commends
                     for (let [type, count] of Object.entries(commendTypes)) {
                         if (count > 0) {

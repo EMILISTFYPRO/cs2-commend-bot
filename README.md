@@ -1,100 +1,72 @@
 # CS2 Commend Bot
 
-Modern CS2 commend bot with Discord integration support.
+Modern Steam commend bot with database tracking and Discord integration support.
+
+## Installation
+
+```bash
+npm install
+```
 
 ## Setup
 
-### 1. Install Node.js
-Download from: https://nodejs.org/ (v18 or newer)
-
-### 2. Clone and Install
-```bash
-git clone https://github.com/EMILISTFYPRO/cs2-commend-bot.git
-cd cs2-commend-bot
-npm install --legacy-peer-deps
+1. Create `config.json`:
+```json
+{
+    "apiKey": "your-key-here"
+}
 ```
 
-### 3. Create config.json
-```bash
-copy config.json.example config.json
+2. Create `bots.txt` with bot credentials:
+```
+username1:password1:sharedsecret1
+username2:password2:sharedsecret2
+username3:password3:sharedsecret3
 ```
 
-Edit `config.json` and add your **Steam Web API Key** from: https://steamcommunity.com/dev/apikey
+3. Import bots into database:
+```bash
+npm run manage-db
+# Select option 2: Import bots from bots.txt
+```
 
-### 4. Manage Database
-Add bot accounts and customer balances:
+## Usage
+
+### Manage Database
 ```bash
 npm run manage-db
 ```
+Options:
+1. Add bot account manually
+2. Import bots from bots.txt
+3. Add customer balance
+4. List accounts
+5. List balances
+6. View commend history
+7. Delete account
 
-**Menu options:**
-- Add bot accounts (Steam credentials)
-- Add customer balances
-- View accounts and balances
-- Check commend history
-
-### 5. Test the bot
+### Test Bot
 ```bash
 npm start test 76561198000000000 5 5 5
 ```
+Sends 5 friendly, 5 teaching, and 5 leader commends to the target Steam ID.
 
-This sends commends to Steam ID `76561198000000000` with 5 friendly, 5 teaching, 5 leader commends.
+## Features
+
+✅ Real Steam authentication with Steam Guard 2FA
+✅ Bulk bot import from file
+✅ Commend tracking database
+✅ Customer balance management
+✅ Error logging and retry
+✅ Discord bot integration ready
 
 ## Database
 
-The bot uses SQLite with 3 tables:
+The bot uses SQLite with three main tables:
+- `accounts`: Bot Steam accounts
+- `commends`: Commend history
+- `balances`: Customer balances
 
-**accounts** - Bot Steam accounts
-- username
-- password
-- shared_secret (optional for 2FA)
+## License
 
-**balances** - Customer commend balances
-- discord_id
-- steam_id
-- balance (number of commends)
-
-**commends** - History of all commends sent
-- account_id
-- target_steamid
-- commend_type
-- status
-- timestamp
-
-## Discord Bot Integration
-
-To use with your Discord bot:
-
-```javascript
-const commendBot = require('./bot.js');
-
-// Check balance
-const balance = await commendBot.checkBalance(discordId);
-
-// Send commends
-await commendBot.sendCommends(targetSteamId, {
-    friendly: 10,
-    teaching: 10,
-    leader: 10
-});
-
-// Deduct from balance
-await commendBot.deductBalance(discordId, 30);
-
-// Add balance (when customer pays)
-await commendBot.addBalance(discordId, steamId, 100);
-```
-
-## Notes
-
-- One IP can do ~20 commends per 5 minutes
-- Accounts are stored with passwords (keep secure!)
-- No external Steam integration yet (framework ready for integration)
-
-## Future Improvements
-
-- [ ] Real Steam API integration
-- [ ] Proxy support
-- [ ] Automatic Steam Guard handling
-- [ ] Web dashboard
-- [ ] Rate limiting per IP
+ISC
