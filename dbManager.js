@@ -1,5 +1,8 @@
 const sqlite3 = require('sqlite3').verbose();
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+
 const db = new sqlite3.Database('commends.db');
 
 const rl = readline.createInterface({
@@ -11,38 +14,142 @@ function question(q) {
     return new Promise(resolve => rl.question(q, resolve));
 }
 
+// Initialize tables
+function initializeTables() {
+    return new Promise((resolve) => {
+        db.serialize(() => {
+            db.run(`
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE,
+                    password TEXT,
+                    shared_secret TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
+            db.run(`
+                CREATE TABLE IF NOT EXISTS commends (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER,
+                    target_steamid TEXT,
+                    commend_type TEXT,
+                    status TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (account_id) REFERENCES accounts(id)
+                )
+            `);
+
+            db.run(`
+                CREATE TABLE IF NOT EXISTS balances (
+                    discord_id TEXT PRIMARY KEY,
+                    steam_id TEXT,
+                    balance INTEGER DEFAULT 0,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `, () => {
+                console.log('✅ Database tables initialized');
+                resolve();
+            });
+        });
+    });
+}
+
+// Import bots from bots.txt
+async function importBotsFromFile() {
+    const filePath = path.join(__dirname, 'bots.txt');
+    
+    if (!fs.existsSync(filePath)) {
+        console.log('⚠️  bots.txt not found. Create one with format: username:password');
+        return;
+    }
+
+    const fileContent = fs.readFileSync(filePath, 'utf8');
+    const lines = fileContent.split('\n').filter(line => line.trim());
+
+    if (lines.length === 0) {
+        console.log('⚠️  bots.txt is empty');
+        return;
+    }
+
+    let imported = 0;
+    let skipped = 0;
+
+    for (const line of lines) {
+        const [username, password] = line.split(':').map(s => s.trim());
+        
+        if (!username || !password) {
+            console.log(`⚠️  Skipped invalid line: ${line}`);
+            skipped++;
+            continue;
+        }
+
+        try {
+            await new Promise((resolve, reject) => {
+                db.run(
+                    'INSERT INTO accounts (username, password, shared_secret) VALUES (?, ?, ?)',
+                    [username, password, null],
+                    (err) => {
+                        if (err) {
+                            if (err.message.includes('UNIQUE constraint failed')) {
+                                console.log(`⚠️  Account already exists: ${username}`);
+                                skipped++;
+                            } else {
+                                console.error(`❌ Error adding ${username}:`, err.message);
+                                skipped++;
+                            }
+                        } else {
+                            console.log(`✅ Imported: ${username}`);
+                            imported++;
+                        }
+                        resolve();
+                    }
+                );
+            });
+        } catch (err) {
+            skipped++;
+        }
+    }
+
+    console.log(`\n📊 Import complete: ${imported} added, ${skipped} skipped`);
+}
+
 async function menu() {
     console.log('\n=== CS2 Commend Bot - Database Manager ===');
-    console.log('1. Add bot account');
-    console.log('2. Add customer balance');
-    console.log('3. List accounts');
-    console.log('4. List balances');
-    console.log('5. View commend history');
-    console.log('6. Delete account');
-    console.log('7. Exit');
+    console.log('1. Add single bot account');
+    console.log('2. Import bots from bots.txt');
+    console.log('3. Add customer balance');
+    console.log('4. List accounts');
+    console.log('5. List balances');
+    console.log('6. View commend history');
+    console.log('7. Delete account');
+    console.log('8. Exit');
     
-    const choice = await question('\nSelect option (1-7): ');
+    const choice = await question('\nSelect option (1-8): ');
     
     switch(choice) {
         case '1':
             await addAccount();
             break;
         case '2':
-            await addBalance();
+            await importBotsFromFile();
             break;
         case '3':
-            await listAccounts();
+            await addBalance();
             break;
         case '4':
-            await listBalances();
+            await listAccounts();
             break;
         case '5':
-            await viewHistory();
+            await listBalances();
             break;
         case '6':
-            await deleteAccount();
+            await viewHistory();
             break;
         case '7':
+            await deleteAccount();
+            break;
+        case '8':
             console.log('Goodbye!');
             rl.close();
             db.close();
@@ -151,4 +258,5 @@ async function deleteAccount() {
     });
 }
 
-menu();
+// Initialize tables before starting menu
+initializeTables().then(() => menu());
