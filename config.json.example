@@ -1,0 +1,12 @@
+{
+  "steamWebAPIKey": "YOUR_STEAM_WEB_API_KEY_HERE",
+  "commendSettings": {
+    "friendly": 10,
+    "teaching": 10,
+    "leader": 10
+  },
+  "delayBetweenAccounts": 1000,
+  "cooldownMinutes": 60,
+  "proxyEnabled": false,
+  "proxyFile": "proxies.txt"
+}
