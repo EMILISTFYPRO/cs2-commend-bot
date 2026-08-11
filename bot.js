@@ -15,6 +15,14 @@ if (fs.existsSync(configPath)) {
     process.exit(1);
 }
 
+// Validate Steam Web API key
+if (!config.steamWebAPIKey) {
+    console.error('❌ steamWebAPIKey not found in config.json!');
+    process.exit(1);
+}
+
+console.log(`🔑 Using Steam Web API Key: ${config.steamWebAPIKey.substring(0, 5)}...`);
+
 // Initialize database
 const db = new sqlite3.Database('commends.db', (err) => {
     if (err) console.error('Database error:', err);
@@ -69,7 +77,7 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
     console.log(`\n🎯 Starting commends for: ${targetSteamID}`);
     console.log(`📊 Commend types: ${JSON.stringify(commendTypes)}`);
     if (useMockMode) console.log('🧪 MOCK MODE - Not using real Steam accounts\n');
-    else console.log('⚡ REAL MODE - Using actual Steam accounts\n');
+    else console.log('⚡ REAL MODE - Using Steam Web API for real commends\n');
 
     return new Promise((resolve, reject) => {
         db.all('SELECT * FROM accounts', async (err, accounts) => {
@@ -95,8 +103,8 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                     console.log(`\n👤 Using account: ${account.username}`);
                     
                     if (!useMockMode) {
-                        // Initialize Steam bot
-                        steamBot = new SteamBot(account.username, account.password, account.shared_secret);
+                        // Initialize Steam bot with API key
+                        steamBot = new SteamBot(account.username, account.password, account.shared_secret, config.steamWebAPIKey);
                         
                         // Login to Steam
                         console.log('🔐 Logging into Steam...');
@@ -151,13 +159,13 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                     }
 
                     // Logout
-                    if (!useMockMode) {
+                    if (!useMockMode && steamBot) {
                         console.log('👋 Logging out...');
                         steamBot.logout();
                     }
                     
                     // Delay between accounts
-                    await new Promise(r => setTimeout(r, 2000));
+                    await new Promise(r => setTimeout(r, config.delayBetweenAccounts || 2000));
 
                 } catch (error) {
                     console.error(`   ❌ Error with ${account.username}:`, error.message);
@@ -237,7 +245,8 @@ module.exports = {
     checkBalance,
     deductBalance,
     addBalance,
-    db
+    db,
+    config
 };
 
 // Run if executed directly
