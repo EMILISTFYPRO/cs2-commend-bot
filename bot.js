@@ -69,6 +69,7 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
     console.log(`\n🎯 Starting commends for: ${targetSteamID}`);
     console.log(`📊 Commend types: ${JSON.stringify(commendTypes)}`);
     if (useMockMode) console.log('🧪 MOCK MODE - Not using real Steam accounts\n');
+    else console.log('⚡ REAL MODE - Using actual Steam accounts\n');
 
     return new Promise((resolve, reject) => {
         db.all('SELECT * FROM accounts', async (err, accounts) => {
@@ -250,7 +251,8 @@ if (require.main === module) {
             teaching: parseInt(args[3]) || 5,
             leader: parseInt(args[4]) || 5
         };
-        const mockMode = args[5] === 'mock' || true; // Default to mock mode
+        // Use real mode unless 'mock' is explicitly passed
+        const mockMode = args[5] === 'mock' ? true : false;
         
         sendCommends(targetSteamID, commends, mockMode)
             .then(() => {
