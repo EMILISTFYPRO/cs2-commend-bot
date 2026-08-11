@@ -1,0 +1,20 @@
+{
+  "name": "cs2-commend-bot",
+  "version": "1.0.0",
+  "description": "Modern CS2 Commend Bot with Discord integration",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "manage-db": "node dbManager.js",
+    "test": "node bot.js test"
+  },
+  "keywords": ["cs2", "commend", "bot", "discord"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "sqlite3": "^5.1.6",
+    "inquirer": "^8.2.5"
+  }
+}
