@@ -22,6 +22,7 @@ class SteamBot {
             let loggedIn = false;
             let steamGuardHandled = false;
             let gcReady = false;
+            let errorOccurred = false;
 
             this.client.on('loggedIn', () => {
                 loggedIn = true;
@@ -43,7 +44,8 @@ class SteamBot {
 
             this.client.on('error', (err) => {
                 console.error(`❌ Steam login error: ${err.message}`);
-                if (!loggedIn) {
+                errorOccurred = true;
+                if (!loggedIn && !errorOccurred) {
                     reject(err);
                 }
             });
@@ -55,6 +57,8 @@ class SteamBot {
             this.client.on('steamGuard', (domain, callback) => {
                 if (steamGuardHandled) return;
                 steamGuardHandled = true;
+
+                console.log(`🔐 Steam Guard requested`);
 
                 if (!this.sharedSecret) {
                     console.error('❌ Steam Guard required but no shared secret provided');
@@ -72,42 +76,56 @@ class SteamBot {
                 }
             });
 
+            this.client.on('disconnected', (eresult, msg) => {
+                console.warn(`⚠️ Disconnected from Steam: ${msg} (${eresult})`);
+            });
+
             const loginDetails = {
                 accountName: this.username,
                 password: this.password
             };
 
+            console.log(`📡 Attempting to connect to Steam...`);
             this.client.logOn(loginDetails);
 
-            // Launch CS2 app
+            // Launch CS2 app after login
             this.client.on('loggedIn', () => {
                 console.log(`🚀 Launching CS2 app...`);
                 this.client.gamesPlayed([730], true);
             });
 
             // Wait for GC connection
-            const timeout = setTimeout(() => {
-                if (!gcReady) {
+            const gcTimeout = setTimeout(() => {
+                if (!gcReady && loggedIn) {
                     console.warn(`⏱️ GC connection timeout for ${this.username}, proceeding anyway...`);
                     resolve();
                 }
             }, 15000);
 
             this.csgo.on('ready', () => {
-                clearTimeout(timeout);
+                clearTimeout(gcTimeout);
                 resolve();
             });
 
-            // Fallback resolve after login
+            // Fallback resolve after successful login
             const loginTimeout = setTimeout(() => {
-                if (loggedIn && !gcReady) {
-                    clearTimeout(timeout);
-                    console.warn(`⏱️ GC not ready but logged in, resolving...`);
+                if (loggedIn) {
+                    clearTimeout(gcTimeout);
+                    console.warn(`⏱️ Login successful but GC not ready, resolving...`);
                     resolve();
+                } else if (!errorOccurred) {
+                    console.error('❌ Steam login timeout - no response from Steam servers');
+                    clearTimeout(gcTimeout);
+                    reject(new Error('Steam login timeout'));
                 }
-            }, 10000);
+            }, 30000);
 
             this.client.on('loggedIn', () => {
+                clearTimeout(loginTimeout);
+            });
+
+            this.client.on('error', () => {
+                clearTimeout(gcTimeout);
                 clearTimeout(loginTimeout);
             });
         });
