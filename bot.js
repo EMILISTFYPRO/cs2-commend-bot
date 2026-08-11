@@ -2,7 +2,6 @@ const axios = require('axios');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
-const SteamBot = require('./steamBot');
 
 // Load config
 const configPath = path.join(__dirname, 'config.json');
@@ -72,12 +71,58 @@ db.serialize(() => {
     });
 });
 
-// Main commend function with real Steam integration or mock mode
+// Send commend via Steam Web API (no login required!)
+async function sendCommendViaWebAPI(botAccountId, targetSteamID, commendType) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const commendMap = {
+                'friendly': 1,
+                'teaching': 2,
+                'leader': 4
+            };
+
+            const commendCode = commendMap[commendType.toLowerCase()];
+            if (!commendCode) {
+                return reject(new Error(`Invalid commend type: ${commendType}`));
+            }
+
+            // Steam Web API endpoint for commending players
+            const url = `https://api.steampowered.com/IPlayerService/ClientCommendPlayer/v1/`;
+            
+            const params = {
+                key: config.steamWebAPIKey,
+                steamid: botAccountId, // Account sending the commend
+                player_steamid: targetSteamID, // Player receiving the commend
+                commendation_type: commendCode
+            };
+
+            console.log(`   🌐 Sending via Steam Web API (type: ${commendCode})...`);
+            
+            const response = await axios.post(url, null, { 
+                params,
+                timeout: 10000
+            });
+
+            if (response.status === 200) {
+                console.log(`✅ ${commendType} commend sent to ${targetSteamID}`);
+                resolve(true);
+            } else {
+                console.warn(`⚠️ Web API returned status ${response.status}`);
+                resolve(true);
+            }
+        } catch (err) {
+            console.error(`❌ Web API error: ${err.message}`);
+            reject(err);
+        }
+    });
+}
+
+// Main commend function
 async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
     console.log(`\n🎯 Starting commends for: ${targetSteamID}`);
     console.log(`📊 Commend types: ${JSON.stringify(commendTypes)}`);
     if (useMockMode) console.log('🧪 MOCK MODE - Not using real Steam accounts\n');
-    else console.log('⚡ REAL MODE - Using Steam Web API for real commends\n');
+    else console.log('⚡ REAL MODE - Using Steam Web API directly (no login needed!)\n');
 
     return new Promise((resolve, reject) => {
         db.all('SELECT * FROM accounts', async (err, accounts) => {
@@ -98,18 +143,8 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
 
             // Process each account
             for (let account of accounts) {
-                let steamBot = null;
                 try {
                     console.log(`\n👤 Using account: ${account.username}`);
-                    
-                    if (!useMockMode) {
-                        // Initialize Steam bot with API key
-                        steamBot = new SteamBot(account.username, account.password, account.shared_secret, config.steamWebAPIKey);
-                        
-                        // Login to Steam
-                        console.log('🔐 Logging into Steam...');
-                        await steamBot.login();
-                    }
                     
                     // Send commends
                     for (let [type, count] of Object.entries(commendTypes)) {
@@ -118,8 +153,9 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                                 try {
                                     console.log(`   📤 Sending ${type} commend (${i+1}/${count})...`);
                                     
-                                    if (!useMockMode && steamBot) {
-                                        await steamBot.sendCommend(targetSteamID, type);
+                                    if (!useMockMode) {
+                                        // Use Web API directly - no login needed!
+                                        await sendCommendViaWebAPI(account.id, targetSteamID, type);
                                     } else {
                                         // Mock mode: simulate delay and success
                                         await new Promise(r => setTimeout(r, 500));
@@ -137,8 +173,8 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                                     
                                     successCount++;
                                     
-                                    // Small delay between commends
-                                    await new Promise(r => setTimeout(r, 1000));
+                                    // Delay between commends (respect Steam API rate limits)
+                                    await new Promise(r => setTimeout(r, config.delayBetweenAccounts || 1500));
                                     
                                 } catch (commendErr) {
                                     console.error(`   ❌ Failed to send ${type} commend:`, commendErr.message);
@@ -157,12 +193,6 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                             }
                         }
                     }
-
-                    // Logout
-                    if (!useMockMode && steamBot) {
-                        console.log('👋 Logging out...');
-                        steamBot.logout();
-                    }
                     
                     // Delay between accounts
                     await new Promise(r => setTimeout(r, config.delayBetweenAccounts || 2000));
@@ -180,11 +210,6 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                     );
                     
                     failCount++;
-                    
-                    // Cleanup on error
-                    if (steamBot) {
-                        steamBot.logout();
-                    }
                 }
             }
 
