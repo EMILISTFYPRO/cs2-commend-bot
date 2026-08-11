@@ -84,31 +84,26 @@ async function importBotsFromFile() {
             continue;
         }
 
-        try {
-            await new Promise((resolve, reject) => {
-                db.run(
-                    'INSERT INTO accounts (username, password, shared_secret) VALUES (?, ?, ?)',
-                    [username, password, null],
-                    (err) => {
-                        if (err) {
-                            if (err.message.includes('UNIQUE constraint failed')) {
-                                console.log(`⚠️  Account already exists: ${username}`);
-                                skipped++;
-                            } else {
-                                console.error(`❌ Error adding ${username}:`, err.message);
-                                skipped++;
-                            }
+        await new Promise((resolve) => {
+            db.run(
+                'INSERT INTO accounts (username, password, shared_secret) VALUES (?, ?, ?)',
+                [username, password, null],
+                (err) => {
+                    if (err) {
+                        if (err.message.includes('UNIQUE constraint failed')) {
+                            console.log(`⚠️  Account already exists: ${username}`);
                         } else {
-                            console.log(`✅ Imported: ${username}`);
-                            imported++;
+                            console.log(`❌ Error adding ${username}: ${err.message}`);
                         }
-                        resolve();
+                        skipped++;
+                    } else {
+                        console.log(`✅ Imported: ${username}`);
+                        imported++;
                     }
-                );
-            });
-        } catch (err) {
-            skipped++;
-        }
+                    resolve();
+                }
+            );
+        });
     }
 
     console.log(`\n📊 Import complete: ${imported} added, ${skipped} skipped`);
@@ -116,7 +111,7 @@ async function importBotsFromFile() {
 
 async function menu() {
     console.log('\n=== CS2 Commend Bot - Database Manager ===');
-    console.log('1. Add single bot account');
+    console.log('1. Add bot account');
     console.log('2. Import bots from bots.txt');
     console.log('3. Add customer balance');
     console.log('4. List accounts');
@@ -198,7 +193,7 @@ async function listAccounts() {
             console.error('❌ Error:', err.message);
             return;
         }
-        if (rows.length === 0) {
+        if (!rows || rows.length === 0) {
             console.log('No accounts found');
             return;
         }
@@ -215,7 +210,7 @@ async function listBalances() {
             console.error('❌ Error:', err.message);
             return;
         }
-        if (rows.length === 0) {
+        if (!rows || rows.length === 0) {
             console.log('No balances found');
             return;
         }
@@ -237,7 +232,7 @@ async function viewHistory() {
                 console.error('❌ Error:', err.message);
                 return;
             }
-            if (rows.length === 0) {
+            if (!rows || rows.length === 0) {
                 console.log('No commend history found');
                 return;
             }
