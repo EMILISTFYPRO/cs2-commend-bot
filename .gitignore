@@ -1,0 +1,6 @@
+node_modules/
+commends.db
+config.json
+.env
+*.log
+proxies.txt
