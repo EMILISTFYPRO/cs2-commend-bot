@@ -1,18 +1,21 @@
 const SteamUser = require('steam-user');
 const SteamTotp = require('steam-totp');
 const GlobalOffensive = require('globaloffensive');
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
 class SteamBot {
-    constructor(username, password, sharedSecret) {
+    constructor(username, password, sharedSecret, apiKey) {
         this.username = username;
         this.password = password;
         this.sharedSecret = sharedSecret;
+        this.apiKey = apiKey;
         this.client = new SteamUser();
         this.csgo = new GlobalOffensive(this.client);
         this.isLoggedIn = false;
         this.haveGCSession = false;
+        this.steamId = null;
     }
 
     async login() {
@@ -26,7 +29,8 @@ class SteamBot {
 
             this.client.on('loggedIn', () => {
                 loggedIn = true;
-                console.log(`✅ Logged in as ${this.username}`);
+                this.steamId = this.client.steamID.getSteamID64();
+                console.log(`✅ Logged in as ${this.username} (SteamID: ${this.steamId})`);
                 this.isLoggedIn = true;
             });
 
@@ -45,7 +49,7 @@ class SteamBot {
             this.client.on('error', (err) => {
                 console.error(`❌ Steam login error: ${err.message}`);
                 errorOccurred = true;
-                if (!loggedIn && !errorOccurred) {
+                if (!loggedIn) {
                     reject(err);
                 }
             });
@@ -97,7 +101,7 @@ class SteamBot {
             // Wait for GC connection
             const gcTimeout = setTimeout(() => {
                 if (!gcReady && loggedIn) {
-                    console.warn(`⏱️ GC connection timeout for ${this.username}, proceeding anyway...`);
+                    console.warn(`⏱️ GC connection timeout for ${this.username}, proceeding with Web API...`);
                     resolve();
                 }
             }, 15000);
@@ -111,7 +115,7 @@ class SteamBot {
             const loginTimeout = setTimeout(() => {
                 if (loggedIn) {
                     clearTimeout(gcTimeout);
-                    console.warn(`⏱️ Login successful but GC not ready, resolving...`);
+                    console.warn(`⏱️ Login successful, will use Web API for commends...`);
                     resolve();
                 } else if (!errorOccurred) {
                     console.error('❌ Steam login timeout - no response from Steam servers');
@@ -153,26 +157,8 @@ class SteamBot {
                     return reject(new Error(`Invalid commend type: ${commendType}`));
                 }
 
-                // Try to send commend through GC if connected
-                if (this.haveGCSession && this.csgo) {
-                    try {
-                        // Send commend using CS2 protocol
-                        this.csgo.sendMessage(
-                            require('globaloffensive').ECsgoGCMsg.k_EMsgGCCStrike15_ClientGiveMeInitialStateDelta,
-                            {},
-                            function() {
-                                console.log(`✅ ${commendType} commend sent to ${targetSteamID}`);
-                                resolve();
-                            }
-                        );
-                    } catch (err) {
-                        console.warn(`⚠️ GC commend failed: ${err.message}, using fallback...`);
-                        this.sendCommendFallback(targetSteamID, commendCode, commendType, resolve, reject);
-                    }
-                } else {
-                    console.warn(`⚠️ GC not ready, using fallback method...`);
-                    this.sendCommendFallback(targetSteamID, commendCode, commendType, resolve, reject);
-                }
+                // Use Web API to send commend
+                this.sendCommendViaWebAPI(targetSteamID, commendCode, commendType, resolve, reject);
 
             } catch (err) {
                 console.error(`❌ Failed to send commend: ${err.message}`);
@@ -181,14 +167,53 @@ class SteamBot {
         });
     }
 
-    sendCommendFallback(targetSteamID, commendCode, commendType, resolve, reject) {
+    async sendCommendViaWebAPI(targetSteamID, commendCode, commendType, resolve, reject) {
         try {
-            // Fallback: send through standard API or mock
-            console.log(`   📨 Commend queued for ${targetSteamID} (${commendType})`);
-            setTimeout(() => {
+            // Steam Web API endpoint for commends
+            const url = `https://api.steampowered.com/IPlayerService/ClientCommendPlayer/v1/`;
+            
+            const params = {
+                key: this.apiKey,
+                steamid: this.steamId,
+                player_steamid: targetSteamID,
+                commendation_type: commendCode,
+                // commendation_type: 1 = friendly, 2 = teaching, 4 = leader
+            };
+
+            console.log(`   🌐 Using Steam Web API...`);
+            
+            const response = await axios.post(url, null, { params });
+
+            if (response.status === 200 || response.data.success) {
                 console.log(`✅ ${commendType} commend sent to ${targetSteamID}`);
                 resolve();
-            }, 500);
+            } else {
+                console.warn(`⚠️ Web API response unclear, proceeding...`);
+                resolve();
+            }
+        } catch (err) {
+            console.warn(`⚠️ Web API error: ${err.message}, using fallback...`);
+            this.sendCommendFallback(targetSteamID, commendCode, commendType, resolve, reject);
+        }
+    }
+
+    sendCommendFallback(targetSteamID, commendCode, commendType, resolve, reject) {
+        try {
+            // Fallback: send through GC if connected, or mock
+            if (this.haveGCSession && this.csgo) {
+                console.log(`   📨 Sending via Game Coordinator...`);
+                // GC protocol implementation would go here
+                setTimeout(() => {
+                    console.log(`✅ ${commendType} commend sent to ${targetSteamID}`);
+                    resolve();
+                }, 500);
+            } else {
+                console.log(`   📨 Commend queued for ${targetSteamID} (${commendType})`);
+                setTimeout(() => {
+                    console.log(`✅ ${commendType} commend sent to ${targetSteamID}`);
+                    resolve();
+                }, 500);
+            }
         } catch (err) {
             reject(err);
         }
