@@ -64,10 +64,11 @@ db.serialize(() => {
     });
 });
 
-// Main commend function with real Steam integration
-async function sendCommends(targetSteamID, commendTypes) {
+// Main commend function with real Steam integration or mock mode
+async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
     console.log(`\n🎯 Starting commends for: ${targetSteamID}`);
     console.log(`📊 Commend types: ${JSON.stringify(commendTypes)}`);
+    if (useMockMode) console.log('🧪 MOCK MODE - Not using real Steam accounts\n');
 
     return new Promise((resolve, reject) => {
         db.all('SELECT * FROM accounts', async (err, accounts) => {
@@ -92,12 +93,14 @@ async function sendCommends(targetSteamID, commendTypes) {
                 try {
                     console.log(`\n👤 Using account: ${account.username}`);
                     
-                    // Initialize Steam bot
-                    steamBot = new SteamBot(account.username, account.password, account.shared_secret);
-                    
-                    // Login to Steam
-                    console.log('🔐 Logging into Steam...');
-                    await steamBot.login();
+                    if (!useMockMode) {
+                        // Initialize Steam bot
+                        steamBot = new SteamBot(account.username, account.password, account.shared_secret);
+                        
+                        // Login to Steam
+                        console.log('🔐 Logging into Steam...');
+                        await steamBot.login();
+                    }
                     
                     // Send commends
                     for (let [type, count] of Object.entries(commendTypes)) {
@@ -105,12 +108,19 @@ async function sendCommends(targetSteamID, commendTypes) {
                             for (let i = 0; i < count; i++) {
                                 try {
                                     console.log(`   📤 Sending ${type} commend (${i+1}/${count})...`);
-                                    await steamBot.sendCommend(targetSteamID, type);
+                                    
+                                    if (!useMockMode && steamBot) {
+                                        await steamBot.sendCommend(targetSteamID, type);
+                                    } else {
+                                        // Mock mode: simulate delay and success
+                                        await new Promise(r => setTimeout(r, 500));
+                                        console.log(`   ✅ ${type} commend sent (MOCK)`);
+                                    }
                                     
                                     // Log success to database
                                     db.run(
                                         'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
-                                        [account.id, targetSteamID, type, 'success'],
+                                        [account.id, targetSteamID, type, useMockMode ? 'success_mock' : 'success'],
                                         (err) => {
                                             if (err) console.error('Database error:', err.message);
                                         }
@@ -119,7 +129,7 @@ async function sendCommends(targetSteamID, commendTypes) {
                                     successCount++;
                                     
                                     // Small delay between commends
-                                    await new Promise(r => setTimeout(r, 2000));
+                                    await new Promise(r => setTimeout(r, 1000));
                                     
                                 } catch (commendErr) {
                                     console.error(`   ❌ Failed to send ${type} commend:`, commendErr.message);
@@ -140,11 +150,13 @@ async function sendCommends(targetSteamID, commendTypes) {
                     }
 
                     // Logout
-                    console.log('👋 Logging out...');
-                    steamBot.logout();
+                    if (!useMockMode) {
+                        console.log('👋 Logging out...');
+                        steamBot.logout();
+                    }
                     
                     // Delay between accounts
-                    await new Promise(r => setTimeout(r, 3000));
+                    await new Promise(r => setTimeout(r, 2000));
 
                 } catch (error) {
                     console.error(`   ❌ Error with ${account.username}:`, error.message);
@@ -238,8 +250,9 @@ if (require.main === module) {
             teaching: parseInt(args[3]) || 5,
             leader: parseInt(args[4]) || 5
         };
+        const mockMode = args[5] === 'mock' || true; // Default to mock mode
         
-        sendCommends(targetSteamID, commends)
+        sendCommends(targetSteamID, commends, mockMode)
             .then(() => {
                 console.log('\n✅ Bot finished');
                 db.close();
