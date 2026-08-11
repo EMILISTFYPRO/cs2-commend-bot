@@ -2,6 +2,7 @@ const axios = require('axios');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
+const SteamBot = require('./steamBot');
 
 // Load config
 const configPath = path.join(__dirname, 'config.json');
@@ -20,7 +21,7 @@ const db = new sqlite3.Database('commends.db', (err) => {
     else console.log('✅ Database connected');
 });
 
-// Create tables
+// Create tables with error callbacks
 db.serialize(() => {
     db.run(`
         CREATE TABLE IF NOT EXISTS accounts (
@@ -30,7 +31,10 @@ db.serialize(() => {
             shared_secret TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    `);
+    `, (err) => {
+        if (err) console.error('Error creating accounts table:', err);
+        else console.log('✅ Accounts table ready');
+    });
 
     db.run(`
         CREATE TABLE IF NOT EXISTS commends (
@@ -42,7 +46,10 @@ db.serialize(() => {
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (account_id) REFERENCES accounts(id)
         )
-    `);
+    `, (err) => {
+        if (err) console.error('Error creating commends table:', err);
+        else console.log('✅ Commends table ready');
+    });
 
     db.run(`
         CREATE TABLE IF NOT EXISTS balances (
@@ -51,10 +58,13 @@ db.serialize(() => {
             balance INTEGER DEFAULT 0,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    `);
+    `, (err) => {
+        if (err) console.error('Error creating balances table:', err);
+        else console.log('✅ Balances table ready');
+    });
 });
 
-// Main commend function
+// Main commend function with real Steam integration
 async function sendCommends(targetSteamID, commendTypes) {
     console.log(`\n🎯 Starting commends for: ${targetSteamID}`);
     console.log(`📊 Commend types: ${JSON.stringify(commendTypes)}`);
@@ -78,30 +88,86 @@ async function sendCommends(targetSteamID, commendTypes) {
 
             // Process each account
             for (let account of accounts) {
+                let steamBot = null;
                 try {
                     console.log(`\n👤 Using account: ${account.username}`);
                     
-                    // Simulate commend (in real implementation, connect to Steam)
+                    // Initialize Steam bot
+                    steamBot = new SteamBot(account.username, account.password, account.shared_secret);
+                    
+                    // Login to Steam
+                    console.log('🔐 Logging into Steam...');
+                    await steamBot.login();
+                    
+                    // Connect to CS2 coordinator
+                    console.log('🎮 Connecting to CS2...');
+                    await steamBot.connectToCSGO();
+                    
+                    // Send commends
                     for (let [type, count] of Object.entries(commendTypes)) {
                         if (count > 0) {
-                            console.log(`   ✓ ${type}: ${count} commends`);
-                            
-                            // Log to database
-                            db.run(
-                                'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
-                                [account.id, targetSteamID, type, 'success']
-                            );
-                            
-                            successCount += count;
+                            for (let i = 0; i < count; i++) {
+                                try {
+                                    console.log(`   📤 Sending ${type} commend (${i+1}/${count})...`);
+                                    await steamBot.sendCommend(targetSteamID, type);
+                                    
+                                    // Log success to database
+                                    db.run(
+                                        'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
+                                        [account.id, targetSteamID, type, 'success'],
+                                        (err) => {
+                                            if (err) console.error('Database error:', err.message);
+                                        }
+                                    );
+                                    
+                                    successCount++;
+                                    
+                                    // Small delay between commends
+                                    await new Promise(r => setTimeout(r, 2000));
+                                    
+                                } catch (commendErr) {
+                                    console.error(`   ❌ Failed to send ${type} commend:`, commendErr.message);
+                                    
+                                    // Log failure to database
+                                    db.run(
+                                        'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
+                                        [account.id, targetSteamID, type, `failed: ${commendErr.message}`],
+                                        (err) => {
+                                            if (err) console.error('Database error:', err.message);
+                                        }
+                                    );
+                                    
+                                    failCount++;
+                                }
+                            }
                         }
                     }
 
-                    // Small delay between accounts
-                    await new Promise(r => setTimeout(r, 1000));
+                    // Logout
+                    console.log('👋 Logging out...');
+                    steamBot.logout();
+                    
+                    // Delay between accounts
+                    await new Promise(r => setTimeout(r, 3000));
 
                 } catch (error) {
                     console.error(`   ❌ Error with ${account.username}:`, error.message);
+                    
+                    // Log account-level failures
+                    db.run(
+                        'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
+                        [account.id, targetSteamID, 'system', `account_error: ${error.message}`],
+                        (err) => {
+                            if (err) console.error('Database error:', err.message);
+                        }
+                    );
+                    
                     failCount++;
+                    
+                    // Cleanup on error
+                    if (steamBot) {
+                        steamBot.logout();
+                    }
                 }
             }
 
@@ -181,10 +247,12 @@ if (require.main === module) {
             .then(() => {
                 console.log('\n✅ Bot finished');
                 db.close();
+                process.exit(0);
             })
             .catch(err => {
                 console.error('❌ Bot error:', err);
                 db.close();
+                process.exit(1);
             });
     }
 }
