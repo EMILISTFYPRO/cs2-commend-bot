@@ -1,7 +1,7 @@
-const axios = require('axios');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
+const SteamBot = require('./steamBot');
 
 // Load config
 const configPath = path.join(__dirname, 'config.json');
@@ -10,17 +10,16 @@ let config = {};
 if (fs.existsSync(configPath)) {
     config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 } else {
-    console.error('❌ config.json not found! Please create it first.');
+    console.error('❌ config.json not found!');
     process.exit(1);
 }
 
-// Validate Steam Web API key
-if (!config.steamWebAPIKey) {
-    console.error('❌ steamWebAPIKey not found in config.json!');
-    process.exit(1);
+console.log(`🎮 Server: ${config.serverIP || '127.0.0.1'}:${config.serverPort || '27015'}`);
+if (config.proxy) {
+    console.log(`🌐 Using proxy: ${config.proxy.split('@')[1]}`);
+} else {
+    console.log(`🌐 No proxy configured`);
 }
-
-console.log(`🔑 Using Steam Web API Key: ${config.steamWebAPIKey.substring(0, 5)}...`);
 
 // Initialize database
 const db = new sqlite3.Database('commends.db', (err) => {
@@ -28,7 +27,7 @@ const db = new sqlite3.Database('commends.db', (err) => {
     else console.log('✅ Database connected');
 });
 
-// Create tables with error callbacks
+// Create tables
 db.serialize(() => {
     db.run(`
         CREATE TABLE IF NOT EXISTS accounts (
@@ -71,58 +70,12 @@ db.serialize(() => {
     });
 });
 
-// Send commend via Steam Web API (no login required!)
-async function sendCommendViaWebAPI(botAccountId, targetSteamID, commendType) {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const commendMap = {
-                'friendly': 1,
-                'teaching': 2,
-                'leader': 4
-            };
-
-            const commendCode = commendMap[commendType.toLowerCase()];
-            if (!commendCode) {
-                return reject(new Error(`Invalid commend type: ${commendType}`));
-            }
-
-            // Steam Web API endpoint for commending players
-            const url = `https://api.steampowered.com/IPlayerService/ClientCommendPlayer/v1/`;
-            
-            const params = {
-                key: config.steamWebAPIKey,
-                steamid: botAccountId, // Account sending the commend
-                player_steamid: targetSteamID, // Player receiving the commend
-                commendation_type: commendCode
-            };
-
-            console.log(`   🌐 Sending via Steam Web API (type: ${commendCode})...`);
-            
-            const response = await axios.post(url, null, { 
-                params,
-                timeout: 10000
-            });
-
-            if (response.status === 200) {
-                console.log(`✅ ${commendType} commend sent to ${targetSteamID}`);
-                resolve(true);
-            } else {
-                console.warn(`⚠️ Web API returned status ${response.status}`);
-                resolve(true);
-            }
-        } catch (err) {
-            console.error(`❌ Web API error: ${err.message}`);
-            reject(err);
-        }
-    });
-}
-
 // Main commend function
 async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
-    console.log(`\n🎯 Starting commends for: ${targetSteamID}`);
-    console.log(`📊 Commend types: ${JSON.stringify(commendTypes)}`);
-    if (useMockMode) console.log('🧪 MOCK MODE - Not using real Steam accounts\n');
-    else console.log('⚡ REAL MODE - Using Steam Web API directly (no login needed!)\n');
+    console.log(`\n🎯 Target: ${targetSteamID}`);
+    console.log(`📊 Commends: ${JSON.stringify(commendTypes)}`);
+    if (useMockMode) console.log('🧪 MOCK MODE\n');
+    else console.log('⚡ REAL MODE - Bots will join server\n');
 
     return new Promise((resolve, reject) => {
         db.all('SELECT * FROM accounts', async (err, accounts) => {
@@ -133,7 +86,7 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
             }
 
             if (accounts.length === 0) {
-                console.error('❌ No bot accounts found! Add accounts using: npm run manage-db');
+                console.error('❌ No bot accounts found!');
                 reject(new Error('No accounts'));
                 return;
             }
@@ -141,51 +94,71 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
             let successCount = 0;
             let failCount = 0;
 
+            const serverIP = config.serverIP || '127.0.0.1';
+            const serverPort = config.serverPort || 27015;
+            const proxy = config.proxy || null;
+
             // Process each account
             for (let account of accounts) {
+                let steamBot = null;
                 try {
-                    console.log(`\n👤 Using account: ${account.username}`);
+                    console.log(`\n👤 Account: ${account.username}`);
                     
-                    // Send commends
+                    if (!useMockMode) {
+                        // Initialize Steam bot with proxy
+                        steamBot = new SteamBot(
+                            account.username,
+                            account.password,
+                            account.shared_secret,
+                            serverIP,
+                            serverPort,
+                            proxy
+                        );
+                        
+                        // Step 1: Login
+                        console.log('   🔐 Step 1: Login to Steam...');
+                        await steamBot.login();
+                        
+                        // Step 2: Join server
+                        console.log('   🎮 Step 2: Joining server...');
+                        await steamBot.joinServer();
+                        
+                        // Wait for server to register
+                        await new Promise(r => setTimeout(r, 3000));
+                    }
+                    
+                    // Step 3: Send commends
+                    console.log('   📤 Step 3: Sending commends...');
                     for (let [type, count] of Object.entries(commendTypes)) {
                         if (count > 0) {
                             for (let i = 0; i < count; i++) {
                                 try {
-                                    console.log(`   📤 Sending ${type} commend (${i+1}/${count})...`);
+                                    console.log(`      📤 ${type} (${i+1}/${count})...`);
                                     
-                                    if (!useMockMode) {
-                                        // Use Web API directly - no login needed!
-                                        await sendCommendViaWebAPI(account.id, targetSteamID, type);
+                                    if (!useMockMode && steamBot) {
+                                        await steamBot.sendCommend(targetSteamID, type);
                                     } else {
-                                        // Mock mode: simulate delay and success
                                         await new Promise(r => setTimeout(r, 500));
-                                        console.log(`   ✅ ${type} commend sent (MOCK)`);
+                                        console.log(`      ✅ ${type} sent (MOCK)`);
                                     }
                                     
-                                    // Log success to database
+                                    // Log to database
                                     db.run(
                                         'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
-                                        [account.id, targetSteamID, type, useMockMode ? 'success_mock' : 'success'],
-                                        (err) => {
-                                            if (err) console.error('Database error:', err.message);
-                                        }
+                                        [account.id, targetSteamID, type, useMockMode ? 'success_mock' : 'success']
                                     );
                                     
                                     successCount++;
                                     
-                                    // Delay between commends (respect Steam API rate limits)
-                                    await new Promise(r => setTimeout(r, config.delayBetweenAccounts || 1500));
+                                    // Delay between commends
+                                    await new Promise(r => setTimeout(r, 1000));
                                     
                                 } catch (commendErr) {
-                                    console.error(`   ❌ Failed to send ${type} commend:`, commendErr.message);
+                                    console.error(`      ❌ Failed: ${commendErr.message}`);
                                     
-                                    // Log failure to database
                                     db.run(
                                         'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
-                                        [account.id, targetSteamID, type, `failed: ${commendErr.message}`],
-                                        (err) => {
-                                            if (err) console.error('Database error:', err.message);
-                                        }
+                                        [account.id, targetSteamID, type, `failed: ${commendErr.message}`]
                                     );
                                     
                                     failCount++;
@@ -193,27 +166,33 @@ async function sendCommends(targetSteamID, commendTypes, useMockMode = false) {
                             }
                         }
                     }
+
+                    // Disconnect
+                    if (!useMockMode && steamBot) {
+                        console.log('   👋 Disconnecting...');
+                        steamBot.logout();
+                    }
                     
-                    // Delay between accounts
+                    // Delay before next account
                     await new Promise(r => setTimeout(r, config.delayBetweenAccounts || 2000));
 
                 } catch (error) {
-                    console.error(`   ❌ Error with ${account.username}:`, error.message);
+                    console.error(`   ❌ Error: ${error.message}`);
                     
-                    // Log account-level failures
                     db.run(
                         'INSERT INTO commends (account_id, target_steamid, commend_type, status) VALUES (?, ?, ?, ?)',
-                        [account.id, targetSteamID, 'system', `account_error: ${error.message}`],
-                        (err) => {
-                            if (err) console.error('Database error:', err.message);
-                        }
+                        [account.id, targetSteamID, 'system', `error: ${error.message}`]
                     );
                     
                     failCount++;
+                    
+                    if (steamBot) {
+                        steamBot.logout();
+                    }
                 }
             }
 
-            console.log(`\n✅ Commending complete!`);
+            console.log(`\n✅ Complete!`);
             console.log(`   Success: ${successCount}`);
             console.log(`   Failed: ${failCount}`);
             
@@ -250,7 +229,7 @@ function deductBalance(discordId, amount) {
     });
 }
 
-// Add balance (when customer pays)
+// Add balance
 function addBalance(discordId, steamId, amount) {
     return new Promise((resolve, reject) => {
         db.run(
@@ -264,7 +243,7 @@ function addBalance(discordId, steamId, amount) {
     });
 }
 
-// Export functions for Discord bot integration
+// Export
 module.exports = {
     sendCommends,
     checkBalance,
@@ -285,7 +264,6 @@ if (require.main === module) {
             teaching: parseInt(args[3]) || 5,
             leader: parseInt(args[4]) || 5
         };
-        // Use real mode unless 'mock' is explicitly passed
         const mockMode = args[5] === 'mock' ? true : false;
         
         sendCommends(targetSteamID, commends, mockMode)
