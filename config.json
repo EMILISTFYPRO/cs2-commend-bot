@@ -1,0 +1,13 @@
+{
+  "steamWebAPIKey": "B394BAF171E947FD1A1C06BC7E5FA352",
+  "serverIP": "127.0.0.1",
+  "serverPort": 27015,
+  "proxy": "socks5://brd-customer-hl_fa07c771-zone-commands_bot-ofsi2if21hyu@brd.superproxy.io:44445",
+  "delayBetweenAccounts": 2000,
+  "commendSettings": {
+    "friendly": 10,
+    "teaching": 10,
+    "leader": 10
+  },
+  "cooldownMinutes": 60
+}
