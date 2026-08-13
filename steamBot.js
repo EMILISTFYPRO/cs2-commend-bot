@@ -4,8 +4,8 @@ const GlobalOffensive = require('globaloffensive');
 const fs = require('fs');
 const path = require('path');
 const dgram = require('dgram');
-const HttpsProxyAgent = require('https-proxy-agent');
-const http = require('http');
+const { SocksClient } = require('socks');
+const net = require('net');
 
 class SteamBot {
     constructor(username, password, sharedSecret, serverIP, serverPort, proxyUrl = null) {
@@ -16,13 +16,34 @@ class SteamBot {
         this.serverPort = serverPort;
         this.proxyUrl = proxyUrl;
         
-        // Create client with proxy if provided
+        // Parse SOCKS5 proxy URL: socks5://user:pass@host:port
         const clientOptions = {};
         if (proxyUrl) {
-            clientOptions.httpAgent = new http.Agent({ 
-                host: proxyUrl.split(':')[0],
-                port: proxyUrl.split(':')[1]
-            });
+            try {
+                // Convert HTTP proxy to SOCKS5 format if needed
+                let socksUrl = proxyUrl;
+                if (socksUrl.startsWith('http://')) {
+                    socksUrl = socksUrl.replace('http://', 'socks5://');
+                }
+                
+                const url = new URL(socksUrl);
+                const host = url.hostname;
+                const port = parseInt(url.port) || 1080;
+                const username = url.username || '';
+                const password = url.password || '';
+                
+                console.log(`🔧 SOCKS5 Proxy configured: ${host}:${port}`);
+                
+                clientOptions.connection = {
+                    type: 'socks5',
+                    host: host,
+                    port: port,
+                    userId: username,
+                    password: password
+                };
+            } catch (err) {
+                console.warn(`⚠️ Invalid proxy URL: ${err.message}`);
+            }
         }
         
         this.client = new SteamUser(clientOptions);
@@ -116,7 +137,7 @@ class SteamBot {
                 password: this.password
             };
 
-            console.log(`📡 Connecting to Steam ${this.proxyUrl ? `via ${this.proxyUrl}` : 'directly'}...`);
+            console.log(`📡 Connecting to Steam ${this.proxyUrl ? `via SOCKS5 proxy` : 'directly'}...`);
             
             try {
                 this.client.logOn(loginDetails);
