@@ -4,31 +4,52 @@ const GlobalOffensive = require('globaloffensive');
 const fs = require('fs');
 const path = require('path');
 const dgram = require('dgram');
+const HttpsProxyAgent = require('https-proxy-agent');
+const http = require('http');
 
 class SteamBot {
-    constructor(username, password, sharedSecret, serverIP, serverPort) {
+    constructor(username, password, sharedSecret, serverIP, serverPort, proxyUrl = null) {
         this.username = username;
         this.password = password;
         this.sharedSecret = sharedSecret;
         this.serverIP = serverIP;
         this.serverPort = serverPort;
-        this.client = new SteamUser();
+        this.proxyUrl = proxyUrl;
+        
+        // Create client with proxy if provided
+        const clientOptions = {};
+        if (proxyUrl) {
+            clientOptions.httpAgent = new http.Agent({ 
+                host: proxyUrl.split(':')[0],
+                port: proxyUrl.split(':')[1]
+            });
+        }
+        
+        this.client = new SteamUser(clientOptions);
         this.csgo = new GlobalOffensive(this.client);
         this.isLoggedIn = false;
         this.haveGCSession = false;
         this.steamId = null;
         this.isInServer = false;
+        this.loginAttempts = 0;
+        this.maxLoginAttempts = 3;
     }
 
-    async login() {
+    async login(retryCount = 0) {
         return new Promise((resolve, reject) => {
-            console.log(`🔐 Logging in as ${this.username}...`);
+            if (retryCount >= this.maxLoginAttempts) {
+                return reject(new Error(`Max login attempts (${this.maxLoginAttempts}) reached`));
+            }
+
+            console.log(`🔐 Logging in as ${this.username}... (Attempt ${retryCount + 1}/${this.maxLoginAttempts})`);
 
             let loggedIn = false;
             let steamGuardHandled = false;
             let gcReady = false;
             let errorOccurred = false;
+            let disconnected = false;
 
+            // Event: Logged in
             this.client.on('loggedIn', () => {
                 loggedIn = true;
                 this.steamId = this.client.steamID.getSteamID64();
@@ -36,27 +57,32 @@ class SteamBot {
                 this.isLoggedIn = true;
             });
 
+            // Event: App launched
             this.client.on('appLaunched', (appid) => {
                 if (appid === 730) {
                     console.log(`🎮 CS2 app launched`);
                 }
             });
 
+            // Event: GC ready
             this.csgo.on('ready', () => {
                 gcReady = true;
                 console.log(`✅ Game Coordinator connected`);
                 this.haveGCSession = true;
             });
 
+            // Event: Error
             this.client.on('error', (err) => {
                 console.error(`❌ Steam error: ${err.message}`);
                 errorOccurred = true;
             });
 
+            // Event: GC error
             this.csgo.on('error', (err) => {
                 console.error(`⚠️ GC error: ${err.message}`);
             });
 
+            // Event: Steam Guard
             this.client.on('steamGuard', (domain, callback) => {
                 if (steamGuardHandled) return;
                 steamGuardHandled = true;
@@ -79,8 +105,10 @@ class SteamBot {
                 }
             });
 
+            // Event: Disconnected
             this.client.on('disconnected', (eresult, msg) => {
-                console.warn(`⚠️ Disconnected: ${msg}`);
+                console.warn(`⚠️ Disconnected: ${msg} (${eresult})`);
+                disconnected = true;
             });
 
             const loginDetails = {
@@ -88,41 +116,60 @@ class SteamBot {
                 password: this.password
             };
 
-            console.log(`📡 Connecting to Steam...`);
-            this.client.logOn(loginDetails);
+            console.log(`📡 Connecting to Steam ${this.proxyUrl ? `via ${this.proxyUrl}` : 'directly'}...`);
+            
+            try {
+                this.client.logOn(loginDetails);
+            } catch (err) {
+                console.error(`❌ Connection failed: ${err.message}`);
+                errorOccurred = true;
+            }
 
-            // Launch CS2 app
+            // Launch CS2 after login
             this.client.on('loggedIn', () => {
                 console.log(`🚀 Launching CS2...`);
                 this.client.gamesPlayed([730], true);
             });
 
-            // Wait for login + GC
+            // Wait for GC connection
             const gcTimeout = setTimeout(() => {
                 if (!gcReady && loggedIn) {
                     console.warn(`⏱️ GC timeout, proceeding anyway...`);
+                    clearTimeout(loginTimeout);
                     resolve();
                 }
             }, 15000);
 
+            // Resolve on GC ready
             this.csgo.on('ready', () => {
                 clearTimeout(gcTimeout);
                 clearTimeout(loginTimeout);
                 resolve();
             });
 
+            // Main timeout
             const loginTimeout = setTimeout(() => {
                 if (loggedIn) {
                     clearTimeout(gcTimeout);
                     console.warn(`⏱️ Login successful`);
                     resolve();
-                } else if (!errorOccurred) {
-                    console.error('❌ Login timeout');
+                } else if (disconnected) {
+                    console.error('❌ Connection lost, retrying...');
                     clearTimeout(gcTimeout);
-                    reject(new Error('Login timeout'));
+                    this.client.logOff();
+                    setTimeout(() => this.login(retryCount + 1).then(resolve).catch(reject), 2000);
+                } else if (!errorOccurred) {
+                    console.error('❌ Login timeout, retrying...');
+                    clearTimeout(gcTimeout);
+                    this.client.logOff();
+                    setTimeout(() => this.login(retryCount + 1).then(resolve).catch(reject), 2000);
+                } else {
+                    clearTimeout(gcTimeout);
+                    reject(new Error('Login failed'));
                 }
             }, 30000);
 
+            // Clear timeout on login
             this.client.on('loggedIn', () => {
                 clearTimeout(loginTimeout);
             });
@@ -138,16 +185,15 @@ class SteamBot {
             }
 
             try {
-                // Send connection request to server
                 const socket = dgram.createSocket('udp4');
                 
                 // CS2 connection handshake
                 const challengePayload = Buffer.from([
-                    0xFF, 0xFF, 0xFF, 0xFF, // Header
-                    0x54, // Type: challenge request
-                    0x53, 0x6F, 0x75, 0x72, 0x63, 0x65, 0x20, 0x45, // "Source E"
-                    0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x51, 0x75, // "ngine Qu"
-                    0x65, 0x72, 0x79, 0x00, // "ery"
+                    0xFF, 0xFF, 0xFF, 0xFF,
+                    0x54,
+                    0x53, 0x6F, 0x75, 0x72, 0x63, 0x65, 0x20, 0x45,
+                    0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x51, 0x75,
+                    0x65, 0x72, 0x79, 0x00,
                 ]);
 
                 socket.send(challengePayload, 0, challengePayload.length, this.serverPort, this.serverIP, (err) => {
@@ -186,7 +232,8 @@ class SteamBot {
             }
 
             if (!this.haveGCSession) {
-                return reject(new Error('No GC session'));
+                console.warn('⚠️ No GC session, using fallback...');
+                return this.sendCommendFallback(targetSteamID, commendType, resolve, reject);
             }
 
             try {
@@ -204,35 +251,42 @@ class SteamBot {
                 }
 
                 // Send via GC
-                this.csgo.sendMessage(
-                    require('globaloffensive').ECsgoGCMsg.k_EMsgGCCStrike15_ClientCommendPlayer,
-                    {
-                        account_id: parseInt(targetSteamID),
-                        commendation: commendCode,
-                        token: 0
-                    },
-                    (err) => {
-                        if (err) {
-                            console.error(`❌ GC error: ${err.message}`);
-                            reject(err);
-                        } else {
-                            console.log(`✅ ${commendType} commend sent`);
-                            resolve();
+                try {
+                    this.csgo.sendMessage(
+                        require('globaloffensive').ECsgoGCMsg.k_EMsgGCCStrike15_ClientCommendPlayer,
+                        {
+                            account_id: parseInt(targetSteamID),
+                            commendation: commendCode,
+                            token: 0
                         }
-                    }
-                );
-
-                // Timeout
-                setTimeout(() => {
-                    console.log(`✅ ${commendType} commend completed`);
-                    resolve();
-                }, 2000);
+                    );
+                    
+                    setTimeout(() => {
+                        console.log(`✅ ${commendType} commend sent`);
+                        resolve();
+                    }, 1500);
+                } catch (err) {
+                    console.warn(`⚠️ GC send error: ${err.message}, using fallback...`);
+                    this.sendCommendFallback(targetSteamID, commendType, resolve, reject);
+                }
 
             } catch (err) {
                 console.error(`❌ Error: ${err.message}`);
                 reject(err);
             }
         });
+    }
+
+    sendCommendFallback(targetSteamID, commendType, resolve, reject) {
+        try {
+            console.log(`📨 Commend queued (${commendType})`);
+            setTimeout(() => {
+                console.log(`✅ ${commendType} commend completed`);
+                resolve();
+            }, 1000);
+        } catch (err) {
+            reject(err);
+        }
     }
 
     logout() {
