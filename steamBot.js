@@ -103,7 +103,7 @@ class SteamBot {
                 console.error(`⚠️ GC error: ${err.message}`);
             });
 
-            // Event: Steam Guard
+            // Event: Steam Guard - FIXED
             this.client.on('steamGuard', (domain, callback) => {
                 if (steamGuardHandled) return;
                 steamGuardHandled = true;
@@ -111,17 +111,22 @@ class SteamBot {
                 console.log(`🔐 Steam Guard required`);
 
                 if (!this.sharedSecret) {
-                    console.error('❌ No shared secret provided');
-                    callback('000000');
+                    console.error(`❌ Account "${this.username}" requires Steam Guard but no shared secret was provided`);
+                    console.error(`💡 Skipping this account. Add a shared secret to the database if 2FA is enabled.`);
+                    
+                    // Reject login gracefully
+                    errorOccurred = true;
+                    this.client.logOff();
                     return;
                 }
 
                 try {
                     const code = SteamTotp.generateAuthCode(this.sharedSecret);
-                    console.log(`🔑 Generated code: ${code}`);
+                    console.log(`🔑 Generated Steam Guard code: ${code}`);
                     callback(code);
                 } catch (err) {
-                    console.error(`❌ Failed to generate code: ${err.message}`);
+                    console.error(`❌ Failed to generate Steam Guard code: ${err.message}`);
+                    errorOccurred = true;
                     callback('000000');
                 }
             });
