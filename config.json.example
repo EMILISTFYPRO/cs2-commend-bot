@@ -1,12 +1,46 @@
 {
-  "steamWebAPIKey": "YOUR_STEAM_WEB_API_KEY_HERE",
-  "commendSettings": {
-    "friendly": 10,
-    "teaching": 10,
-    "leader": 10
+  "steamWebAPIKey": "YOUR_API_KEY_HERE",
+  "commend": {
+    "friendly": 5,
+    "teaching": 5,
+    "leader": 5
   },
-  "delayBetweenAccounts": 1000,
-  "cooldownMinutes": 60,
-  "proxyEnabled": false,
-  "proxyFile": "proxies.txt"
+  "report": {
+    "aimbot": 0,
+    "wallhack": 0,
+    "speedhack": 0,
+    "teamharm": 0,
+    "abusive": 0
+  },
+  "account": {
+    "username": "your_bot_account",
+    "password": "your_bot_password",
+    "sharedSecret": ""
+  },
+  "fetcher": {
+    "username": "your_fetcher_account",
+    "password": "your_fetcher_password",
+    "sharedSecret": "",
+    "maxTries": 10,
+    "tryDelay": 5000,
+    "askSteamGuard": false
+  },
+  "proxy": {
+    "enabled": false,
+    "file": "proxies.txt",
+    "switchProxyEveryXaccounts": 1
+  },
+  "type": "COMMEND",
+  "method": "SERVER",
+  "target": "76561198000000000",
+  "serverID": "auto",
+  "matchID": "0",
+  "perChunk": 5,
+  "betweenChunks": 5000,
+  "cooldown": 300000,
+  "showCommends": false,
+  "autoReportOnMatchEnd": false,
+  "switchServerAfterChunks": 0,
+  "protocol": "Auto",
+  "disableUpdateCheck": true
 }
